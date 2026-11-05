@@ -27,6 +27,11 @@ h2{font-size:1rem;margin:0 0 12px}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--off)}
 .dot.on{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 25%,transparent)}
 button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.filtros{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin-bottom:12px}
+.filtros label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--mute)}
+.contagem{color:var(--mute);font-size:.85rem;margin:0 0 8px}
+input[type=date]{font:inherit;padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+input[type=date]:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 select{font:inherit;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
 select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
@@ -111,7 +116,37 @@ th{color:var(--mute);font-weight:500}
   </div>
 
   <div class="panel">
-    <h2>Eventos recentes</h2>
+    <h2>Eventos</h2>
+    <div class="filtros">
+      <label>Origem
+        <select id="fOrigem">
+          <option value="">Todas</option>
+          <option value="blynk">Blynk</option>
+          <option value="fisico">Físico</option>
+          <option value="sistema">Sistema</option>
+        </select>
+      </label>
+      <label>Evento
+        <select id="fNome">
+          <option value="">Todos</option>
+          <option value="botao_led">Botão do LED</option>
+          <option value="intensidade_led">Intensidade do LED</option>
+          <option value="botao_fisico">Botão físico</option>
+        </select>
+      </label>
+      <label>Ordenar por
+        <select id="fOrdem">
+          <option value="recentes">Mais recentes</option>
+          <option value="antigos">Mais antigos</option>
+          <option value="tipo">Tipo de evento</option>
+          <option value="situacao">Situação (valor)</option>
+        </select>
+      </label>
+      <label>De <input type="date" id="fDe"></label>
+      <label>Até <input type="date" id="fAte"></label>
+      <button id="fLimpar">Limpar filtros</button>
+    </div>
+    <p class="contagem" id="contagem"></p>
     <div class="scroll">
       <table>
         <thead><tr><th>Quando</th><th>Origem</th><th>Pino</th><th>Nome</th><th>Valor</th></tr></thead>
@@ -173,14 +208,38 @@ async function carregar(){
     $("statusTxt").textContent = "Nenhuma leitura para " + DISPOSITIVO;
   }
 
-  const { data: e } = await sb.from("eventos").select("*")
-    .eq("dispositivo", DISPOSITIVO).order("criado_em", {ascending:false}).limit(15);
-  if (e && e.length){
-    $("eventos").innerHTML = e.map(x =>
-      `<tr><td>${fmt(x.criado_em)}</td><td>${x.origem}</td><td>${x.pino_virtual ?? ""}</td><td>${x.nome}</td><td>${x.valor ?? ""}</td></tr>`
-    ).join("");
-  }
+  await carregarEventos();
 }
+
+const esc = t => String(t ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function carregarEventos(){
+  let q = sb.from("eventos").select("*").eq("dispositivo", DISPOSITIVO);
+  if ($("fOrigem").value) q = q.eq("origem", $("fOrigem").value);
+  if ($("fNome").value)   q = q.eq("nome", $("fNome").value);
+  if ($("fDe").value)     q = q.gte("criado_em", new Date($("fDe").value + "T00:00:00").toISOString());
+  if ($("fAte").value)    q = q.lte("criado_em", new Date($("fAte").value + "T23:59:59.999").toISOString());
+  const { data: e, error } = await q.order("criado_em", {ascending: $("fOrdem").value === "antigos"}).limit(50);
+  if (error){ $("contagem").textContent = "Erro ao filtrar: " + error.message; return; }
+
+  // Tipo e situação reorganizam os 50 eventos já carregados (mais recentes)
+  const maisNovo = (a, b) => new Date(b.criado_em) - new Date(a.criado_em);
+  if ($("fOrdem").value === "tipo")     e.sort((a, b) => String(a.nome).localeCompare(String(b.nome)) || maisNovo(a, b));
+  if ($("fOrdem").value === "situacao") e.sort((a, b) => (Number(b.valor ?? -1) - Number(a.valor ?? -1)) || maisNovo(a, b));
+
+  const filtrado = $("fOrigem").value || $("fNome").value || $("fDe").value || $("fAte").value;
+  $("contagem").textContent = e.length + (e.length === 50 ? "+" : "") + " evento(s)" + (filtrado ? " com os filtros aplicados" : ($("fOrdem").value === "antigos" ? " mais antigos" : " mais recentes"));
+  $("eventos").innerHTML = e.length
+    ? e.map(x => `<tr><td>${fmt(x.criado_em)}</td><td>${esc(x.origem)}</td><td>${esc(x.pino_virtual)}</td><td>${esc(x.nome)}</td><td>${esc(x.valor)}</td></tr>`).join("")
+    : `<tr><td colspan="5">Nenhum evento encontrado.</td></tr>`;
+}
+
+['fOrigem','fNome','fOrdem','fDe','fAte'].forEach(id => $(id).addEventListener("change", carregarEventos));
+$("fLimpar").onclick = () => {
+  ['fOrigem','fNome','fDe','fAte'].forEach(id => $(id).value = "");
+  $("fOrdem").value = "recentes";
+  carregarEventos();
+};
 
 function iniciarGrafico(){
   const css = getComputedStyle(document.documentElement);
