@@ -121,7 +121,7 @@ th{color:var(--mute);font-weight:500}
 const SUPABASE_URL = "https://sescaaxyvpmhnpxcqozp.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_Qfg9H0ZjPKRkobj7LqkV8Q_3KwgN_8z";
 const DISPOSITIVO = "esp8266-01";
-const ATUALIZAR_MS = 5000;
+const ATUALIZAR_MS = 30000; // reserva; o Realtime atualiza na hora
 // ============================
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -186,17 +186,33 @@ function iniciarGrafico(){
   });
 }
 
+let canal;
+
+function assinarRealtime(){
+  if (canal) sb.removeChannel(canal);
+  canal = sb.channel("painel-" + DISPOSITIVO)
+    .on("postgres_changes",
+        { event: "INSERT", schema: "public", table: "leituras", filter: "dispositivo=eq." + DISPOSITIVO },
+        () => carregar())
+    .on("postgres_changes",
+        { event: "INSERT", schema: "public", table: "eventos", filter: "dispositivo=eq." + DISPOSITIVO },
+        () => carregar())
+    .subscribe();
+}
+
 function mostrarApp(){
   $("login").hidden = true; $("app").hidden = false;
   $("titulo").textContent = DISPOSITIVO;
   if (!grafico) iniciarGrafico();
   carregar();
+  assinarRealtime();
   clearInterval(timer);
   timer = setInterval(carregar, ATUALIZAR_MS);
 }
 
 function mostrarLogin(){
   clearInterval(timer);
+  if (canal){ sb.removeChannel(canal); canal = null; }
   $("app").hidden = true; $("login").hidden = false;
 }
 
