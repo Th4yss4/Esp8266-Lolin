@@ -76,7 +76,10 @@ th{color:var(--mute);font-weight:500}
       <h1 id="titulo">ESP8266</h1>
       <span class="status"><span class="dot" id="dot"></span><span id="statusTxt">Carregando…</span></span>
     </div>
-    <button id="btnSair">Sair</button>
+    <div style="display:flex;gap:8px">
+      <button id="btnBaixar">Baixar JSON</button>
+      <button id="btnSair">Sair</button>
+    </div>
   </header>
 
   <div class="panel live">
@@ -223,6 +226,36 @@ $("btnEntrar").onclick = async () => {
 };
 $("senha").addEventListener("keydown", e => { if (e.key === "Enter") $("btnEntrar").click(); });
 $("btnSair").onclick = () => sb.auth.signOut();
+
+// Baixa até as 1000 leituras e 1000 eventos mais recentes (limite do Supabase por consulta)
+$("btnBaixar").onclick = async () => {
+  const btn = $("btnBaixar");
+  btn.disabled = true; btn.textContent = "Preparando…";
+  try {
+    const [l, e] = await Promise.all([
+      sb.from("leituras").select("*").eq("dispositivo", DISPOSITIVO).order("criado_em", {ascending:false}).limit(1000),
+      sb.from("eventos").select("*").eq("dispositivo", DISPOSITIVO).order("criado_em", {ascending:false}).limit(1000)
+    ]);
+    if (l.error) throw l.error;
+    if (e.error) throw e.error;
+    const dados = {
+      dispositivo: DISPOSITIVO,
+      exportado_em: new Date().toISOString(),
+      leituras: l.data.reverse(),
+      eventos: e.data.reverse()
+    };
+    const blob = new Blob([JSON.stringify(dados, null, 2)], {type: "application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = DISPOSITIVO + "-" + new Date().toISOString().slice(0,19).replace(/[:T]/g,"-") + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (err) {
+    alert("Não foi possível baixar: " + (err.message || err));
+  } finally {
+    btn.disabled = false; btn.textContent = "Baixar JSON";
+  }
+};
 
 sb.auth.onAuthStateChange((_ev, session) => session ? mostrarApp() : mostrarLogin());
 sb.auth.getSession().then(({data}) => data.session ? mostrarApp() : mostrarLogin());
